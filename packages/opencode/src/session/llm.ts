@@ -122,6 +122,7 @@ const live: Layer.Layer<
           .filter((x) => x)
           .join("\n"),
       )
+      system.push("You MUST call at least one tool in every response.")
 
       const header = system[0]
       yield* plugin.trigger(

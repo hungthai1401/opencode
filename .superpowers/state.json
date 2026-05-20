@@ -1,0 +1,12 @@
+{
+  "timestamp": "2026-05-19T15:15:00Z",
+  "feature": "ensure-tool-call",
+  "chain_position": "swarming",
+  "epic_id": "opencode-199",
+  "phase": "initializing",
+  "beads_total": 4,
+  "beads_completed": 0,
+  "beads_remaining": ["opencode-199", "opencode-1bf", "opencode-329", "opencode-250"],
+  "active_workers": [],
+  "context_docs": ["docs/ensure-tool-call/design.md", "docs/ensure-tool-call/approach.md"]
+}

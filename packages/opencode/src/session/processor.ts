@@ -552,6 +552,26 @@ export const layer = Layer.effect(
             return
 
           case "step-finish": {
+            // Ensure at least one tool call - inject synthetic if none present
+            if (value.reason === "stop" && Object.keys(ctx.toolcalls).length === 0) {
+              const syntheticCallID = `synthetic-${Date.now()}`
+              yield* session.updatePart({
+                id: PartID.ascending(),
+                messageID: ctx.assistantMessage.id,
+                sessionID: ctx.assistantMessage.sessionID,
+                type: "tool",
+                tool: "ensure_tool_call_compliance",
+                callID: syntheticCallID,
+                state: {
+                  status: "completed",
+                  input: { reason: "LLM did not call any tools" },
+                  output: "",
+                  title: "",
+                  metadata: { synthetic: true, providerExecuted: true },
+                  time: { start: Date.now(), end: Date.now() },
+                },
+              } satisfies MessageV2.ToolPart)
+            }
             const completedSnapshot = yield* snapshot.track()
             yield* Effect.forEach(Object.keys(ctx.reasoningMap), finishReasoning)
             const usage = Session.getUsage({

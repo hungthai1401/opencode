@@ -1263,7 +1263,11 @@ export const layer = Layer.effect(
           // Skip provider-executed tool parts — those were fully handled within the
           // provider's stream (e.g. DWS Agent Platform) and don't need a re-loop.
           const hasToolCalls =
-            lastAssistantMsg?.parts.some((part) => part.type === "tool" && !part.metadata?.providerExecuted) ?? false
+            lastAssistantMsg?.parts.some(
+              (part) =>
+                part.type === "tool" &&
+                !(part.state.status !== "pending" && part.state.metadata?.providerExecuted),
+            ) ?? false
 
           if (
             lastAssistant?.finish &&
@@ -1271,7 +1275,6 @@ export const layer = Layer.effect(
             !hasToolCalls &&
             lastUser.id < lastAssistant.id
           ) {
-            yield* slog.info("exiting loop")
             break
           }
 

@@ -12,6 +12,7 @@ import { TodoWriteTool } from "./todo"
 import { WebFetchTool } from "./webfetch"
 import { WriteTool } from "./write"
 import { InvalidTool } from "./invalid"
+import { EnsureToolCallComplianceTool } from "./ensure-compliance"
 import { SkillTool } from "./skill"
 import * as Tool from "./tool"
 import { Config } from "@/config/config"
@@ -118,6 +119,7 @@ export const layer: Layer.Layer<
     const flags = yield* RuntimeFlags.Service
 
     const invalid = yield* InvalidTool
+    const ensureCompliance = yield* EnsureToolCallComplianceTool
     const task = yield* TaskTool
     const taskStatus = yield* TaskStatusTool
     const read = yield* ReadTool
@@ -225,6 +227,7 @@ export const layer: Layer.Layer<
 
         const tool = yield* Effect.all({
           invalid: Tool.init(invalid),
+          ensure_compliance: Tool.init(ensureCompliance),
           shell: Tool.init(shell),
           read: Tool.init(read),
           glob: Tool.init(globtool),
@@ -249,6 +252,7 @@ export const layer: Layer.Layer<
           custom,
           builtin: [
             tool.invalid,
+            tool.ensure_compliance,
             ...(questionEnabled ? [tool.question] : []),
             tool.shell,
             tool.read,
