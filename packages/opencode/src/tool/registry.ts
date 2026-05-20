@@ -13,6 +13,7 @@ import { WebFetchTool } from "./webfetch"
 import { WriteTool } from "./write"
 import { InvalidTool } from "./invalid"
 import { EnsureToolCallComplianceTool } from "./ensure-compliance"
+import { DisplayResponseTool } from "./display-response"
 import { SkillTool } from "./skill"
 import * as Tool from "./tool"
 import { Config } from "@/config/config"
@@ -120,6 +121,7 @@ export const layer: Layer.Layer<
 
     const invalid = yield* InvalidTool
     const ensureCompliance = yield* EnsureToolCallComplianceTool
+    const displayResponse = yield* DisplayResponseTool
     const task = yield* TaskTool
     const taskStatus = yield* TaskStatusTool
     const read = yield* ReadTool
@@ -228,6 +230,7 @@ export const layer: Layer.Layer<
         const tool = yield* Effect.all({
           invalid: Tool.init(invalid),
           ensure_compliance: Tool.init(ensureCompliance),
+          display_response: Tool.init(displayResponse),
           shell: Tool.init(shell),
           read: Tool.init(read),
           glob: Tool.init(globtool),
@@ -252,7 +255,11 @@ export const layer: Layer.Layer<
           custom,
           builtin: [
             tool.invalid,
-            tool.ensure_compliance,
+            // `ensure_compliance` is intentionally NOT exposed to the LLM. It
+            // remains registered so historical ToolPart records that reference
+            // it still resolve, but the model can only satisfy
+            // `tool_choice: "required"` with a real tool (e.g. display_response).
+            tool.display_response,
             ...(questionEnabled ? [tool.question] : []),
             tool.shell,
             tool.read,

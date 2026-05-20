@@ -122,7 +122,23 @@ const live: Layer.Layer<
           .filter((x) => x)
           .join("\n"),
       )
-      system.push("You MUST call at least one tool in every response.")
+      // Tool-use enforcement instructions. Wording mirrors Roo-Code's
+      // `getToolUseGuidelinesSection()` (src/core/prompts/sections/tool-use-guidelines.ts)
+      // so models calibrated against that prompt corpus behave identically here.
+      // Only inject when the caller actually exposed tools — paths like
+      // title-generation pass `tools: {}` and intentionally want plain text,
+      // and telling the model "you must call a tool" while exposing none
+      // produces nonsense responses.
+      if (Object.keys(input.tools).length > 0) {
+        system.push(
+          [
+            "Every assistant turn MUST call at least one tool.",
+            "When no other tool is appropriate for the current turn — for example you only need to send a short conversational remark, brainstorm an idea, present a plan, explain something, or acknowledge the user without finishing the task — use the `display_response` tool as a fallback and put your plain-text message in the `response` argument.",
+            "Do NOT use `display_response` to declare the task complete (use the appropriate completion mechanism) or to ask the user a question (use the appropriate question/ask tool when one is available).",
+            "Do NOT emit ANY free-form assistant prose outside of a tool call. The user only sees content delivered through tools — anything written outside a tool call is invisible.",
+          ].join("\n"),
+        )
+      }
 
       const header = system[0]
       yield* plugin.trigger(

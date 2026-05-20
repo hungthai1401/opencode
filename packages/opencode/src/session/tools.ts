@@ -122,6 +122,18 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
     const schema = yield* Effect.promise(() => Promise.resolve(asSchema(item.inputSchema).jsonSchema))
     const transformed = ProviderTransform.schema(input.model, schema)
     item.inputSchema = jsonSchema(transformed)
+
+    // Anthropic (and brokers that proxy to it, e.g. 9router/perplexity-agent)
+    // reject the whole request with HTTP 400 "invalid tool 'X': description
+    // cannot be empty" when ANY tool in the array has an empty/whitespace-only
+    // description. MCP servers sometimes omit descriptions on individual
+    // capabilities, so backfill a non-empty placeholder rather than letting one
+    // poorly-described MCP tool poison the entire chat turn for the user.
+    if (!item.description || !item.description.toString().trim()) {
+      const fallback = `MCP tool: ${key}`
+      log.warn("mcp tool missing description; substituting placeholder", { tool: key, fallback })
+      item.description = fallback
+    }
     item.execute = (args, opts) =>
       run.promise(
         Effect.gen(function* () {

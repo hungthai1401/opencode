@@ -1439,7 +1439,19 @@ export const layer = Layer.effect(
               messages: [...modelMsgs, ...(isLastStep ? [{ role: "assistant" as const, content: MAX_STEPS }] : [])],
               tools,
               model,
-              toolChoice: format.type === "json_schema" ? "required" : undefined,
+              // Use "auto" for normal chat to match Roo-Code's behavior.
+              // Empirically, brokers like 9router/perplexity-agent silently
+              // ignore `tool_choice: "required"` for some models (Haiku 4.5
+              // emits prose regardless), so "required" offers no real
+              // enforcement and can trip broker-side validation quirks. The
+              // synthetic display_response fallback in processor.ts captures
+              // the model's prose and surfaces it as a display_response
+              // ToolPart whenever the model emits text instead of a tool
+              // call - so the user-facing UX is consistent regardless of
+              // whether the broker honors tool_choice. Structured-output
+              // still uses "required" because StructuredOutput MUST be
+              // called for that flow.
+              toolChoice: format.type === "json_schema" ? "required" : "auto",
             })
 
             if (structured !== undefined) {

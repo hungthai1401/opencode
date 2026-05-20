@@ -74,6 +74,7 @@ type ToolCall = {
 interface ProcessorContext extends Input {
   toolcalls: Record<string, ToolCall>
   shouldBreak: boolean
+  continueOnDeny: boolean
   snapshot: string | undefined
   blocked: boolean
   needsCompaction: boolean
@@ -114,6 +115,7 @@ export const layer = Layer.effect(
         model: input.model,
         toolcalls: {},
         shouldBreak: false,
+        continueOnDeny: false,
         snapshot: initialSnapshot,
         blocked: false,
         needsCompaction: false,
@@ -205,7 +207,13 @@ export const layer = Layer.effect(
           },
         })
         if (error instanceof Permission.RejectedError || error instanceof Question.RejectedError) {
-          ctx.blocked = ctx.shouldBreak
+          // Block (and end the loop) on deny unless the user explicitly opted
+          // in to `experimental.continue_loop_on_deny`. Previously this read
+          // `ctx.shouldBreak` which was incorrectly used as the "continue
+          // on deny" preference flag AND as the per-step break signal — that
+          // double-purpose caused every successful tool call (e.g. `skill`)
+          // to also end the loop. The two concerns are now separated.
+          ctx.blocked = !ctx.continueOnDeny
         }
         yield* settleToolCall(toolCallID)
         return true
@@ -497,6 +505,41 @@ export const layer = Layer.effect(
               })
             }
             yield* completeToolCall(value.id, output)
+            // `display_response` is a terminal "talk to the user" tool. Once
+            // the model has called it, the user's request has been answered
+            // and continuing the agent loop would only produce filler prose
+            // ("I'm ready to answer..." etc). Match Roo-Code's behavior of
+            // ending the turn here and waiting for the next user message.
+            //
+            // Also surface the response as a plain assistant TEXT part so
+            // the TUI shows the model's reply as a normal speech bubble in
+            // addition to the `⚙ display_response` tool line. The text part
+            // is marked `ignored: true` so it is excluded from model replay
+            // (toModelMessages skips ignored text parts) — this avoids
+            // violating Anthropic's ModelMessage schema, which forbids
+            // assistant text after a tool_use in the same message.
+            if (toolCall?.part.tool === "display_response") {
+              ctx.shouldBreak = true
+              const stateInput = (toolCall.part.state as unknown as { input?: { response?: unknown } }).input
+              const responseText =
+                typeof stateInput?.response === "string" && stateInput.response.length > 0
+                  ? stateInput.response
+                  : output.output
+              if (responseText && responseText.trim().length > 0) {
+                const now = Date.now()
+                yield* session.updatePart({
+                  id: PartID.ascending(),
+                  messageID: ctx.assistantMessage.id,
+                  sessionID: ctx.assistantMessage.sessionID,
+                  type: "text",
+                  text: responseText,
+                  ignored: true,
+                  synthetic: true,
+                  time: { start: now, end: now },
+                  metadata: { displayResponse: true },
+                })
+              }
+            }
             return
           }
 
@@ -552,25 +595,52 @@ export const layer = Layer.effect(
             return
 
           case "step-finish": {
-            // Ensure at least one tool call - inject synthetic if none present
+            // Ensure at least one tool call - inject synthetic if none present.
+            // Primary enforcement is `toolChoice: "required"` sent to the provider
+            // (see session/prompt.ts). This fallback only fires when the provider
+            // ignored that constraint, which is unexpected and worth surveilling.
             if (value.reason === "stop" && Object.keys(ctx.toolcalls).length === 0) {
+              const drafted = ctx.currentText?.text?.trim() ?? ""
+              log.warn("synthetic display_response injected: AI SDK did not surface any tool calls from upstream stream", {
+                sessionID: ctx.sessionID,
+                messageID: ctx.assistantMessage.id,
+                providerID: ctx.model.providerID,
+                modelID: ctx.model.id,
+                finishReason: value.reason,
+                hadProse: drafted.length > 0,
+                proseChars: drafted.length,
+              })
               const syntheticCallID = `synthetic-${Date.now()}`
+              // Promote whatever prose the model emitted into a `display_response`
+              // tool call so the user still sees it and the "every response must
+              // call a tool" invariant is honored end-to-end. If the model emitted
+              // nothing at all (the truly degenerate case) fall back to a marker
+              // string so the failure is visible rather than silent.
+              const responseText =
+                drafted.length > 0
+                  ? drafted
+                  : "(no response - provider returned no tool calls and no text despite toolChoice=required)"
               yield* session.updatePart({
                 id: PartID.ascending(),
                 messageID: ctx.assistantMessage.id,
                 sessionID: ctx.assistantMessage.sessionID,
                 type: "tool",
-                tool: "ensure_tool_call_compliance",
+                tool: "display_response",
                 callID: syntheticCallID,
                 state: {
                   status: "completed",
-                  input: { reason: "LLM did not call any tools" },
-                  output: "",
+                  input: { response: responseText },
+                  output: responseText,
                   title: "",
-                  metadata: { synthetic: true, providerExecuted: true },
+                  metadata: { synthetic: true, providerExecuted: true, displayResponse: true },
                   time: { start: Date.now(), end: Date.now() },
                 },
               } satisfies MessageV2.ToolPart)
+              // Synthetic display_response also ends the turn — without this
+              // the agent loop would invoke the LLM again and the model would
+              // typically produce more filler prose, infinite-looping the bug
+              // this synthesis was meant to paper over.
+              ctx.shouldBreak = true
             }
             const completedSnapshot = yield* snapshot.track()
             yield* Effect.forEach(Object.keys(ctx.reasoningMap), finishReasoning)
@@ -799,7 +869,16 @@ export const layer = Layer.effect(
       const process = Effect.fn("SessionProcessor.process")(function* (streamInput: LLM.StreamInput) {
         slog.info("process")
         ctx.needsCompaction = false
-        ctx.shouldBreak = (yield* config.get()).experimental?.continue_loop_on_deny !== true
+        // `shouldBreak` tracks whether THIS step should end the agent loop. By
+        // default we continue so the LLM can react to tool outputs (e.g. read
+        // a file, then summarize it; load a skill, then act on it). Only
+        // terminal signals flip it to true:
+        //   - `display_response` tool result (model finished talking to user)
+        //   - synthetic display_response fallback when provider returned no tools
+        //   - permission/question denial, when the user has NOT opted in to
+        //     `experimental.continue_loop_on_deny`
+        ctx.shouldBreak = false
+        ctx.continueOnDeny = (yield* config.get()).experimental?.continue_loop_on_deny === true
 
         return yield* Effect.gen(function* () {
           yield* Effect.gen(function* () {
@@ -863,6 +942,10 @@ export const layer = Layer.effect(
 
           if (ctx.needsCompaction) return "compact"
           if (ctx.blocked || ctx.assistantMessage.error) return "stop"
+          // display_response (real or synthetic) sets shouldBreak — its
+          // execution means the user's request was answered and the agent
+          // loop should not continue to another LLM step.
+          if (ctx.shouldBreak) return "stop"
           return "continue"
         })
       })
