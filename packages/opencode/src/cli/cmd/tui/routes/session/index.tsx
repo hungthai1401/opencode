@@ -1631,6 +1631,12 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
 
   // Hide tool if showDetails is false and tool completed successfully
   const shouldHide = createMemo(() => {
+    // `display_response` is a "talk to the user" fallback tool. The response
+    // text is also surfaced as a separate (ignored-on-replay) assistant text
+    // part by the session processor, so the speech bubble is what the user
+    // should see. Always hide the tool call itself so the conversation reads
+    // like normal chat instead of "⚙ display_response" noise.
+    if (props.part.tool === "display_response") return true
     if (ctx.showDetails()) return false
     if (props.part.state.status !== "completed") return false
     return true

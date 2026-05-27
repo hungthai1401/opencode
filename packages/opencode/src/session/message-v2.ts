@@ -774,6 +774,13 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
       })
       for (const part of msg.parts) {
         if (part.type === "text") {
+          // Skip text parts flagged as `ignored` (e.g. the synthetic
+          // display-text mirror emitted alongside `display_response` for
+          // TUI rendering). Including them would put assistant text AFTER
+          // a `tool_use` block in the same message, which Anthropic's
+          // ModelMessage schema forbids (the corresponding `tool_result`
+          // must immediately follow on the user side).
+          if (part.ignored) continue
           const text = part.text === "" && hasSignedReasoning ? " " : part.text
           assistantMessage.parts.push({
             type: "text",
