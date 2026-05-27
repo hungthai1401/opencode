@@ -11,6 +11,7 @@ import { TodoWriteTool } from "./todo"
 import { WebFetchTool } from "./webfetch"
 import { WriteTool } from "./write"
 import { InvalidTool } from "./invalid"
+import { DisplayResponseTool } from "./display-response"
 import { SkillTool } from "./skill"
 import * as Tool from "./tool"
 import { Config } from "@/config/config"
@@ -115,6 +116,7 @@ export const layer: Layer.Layer<
     const flags = yield* RuntimeFlags.Service
 
     const invalid = yield* InvalidTool
+    const displayResponse = yield* DisplayResponseTool
     const task = yield* TaskTool
     const read = yield* ReadTool
     const question = yield* QuestionTool
@@ -224,6 +226,7 @@ export const layer: Layer.Layer<
 
         const tool = yield* Effect.all({
           invalid: Tool.init(invalid),
+          display_response: Tool.init(displayResponse),
           shell: Tool.init(shell),
           read: Tool.init(read),
           glob: Tool.init(globtool),
@@ -247,6 +250,7 @@ export const layer: Layer.Layer<
           custom,
           builtin: [
             tool.invalid,
+            tool.display_response,
             ...(questionEnabled ? [tool.question] : []),
             tool.shell,
             tool.read,
